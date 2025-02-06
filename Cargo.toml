@@ -1,0 +1,19 @@
+[package]
+name = "servo-in-glarea"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-channel = "2.3.1"
+epoxy = "0.1.0"
+gdk = { version = "0.9.5", package = "gdk4", features = ["v4_14"] }
+glib = "0.20.7"
+gleam = "0.15"
+gtk = { version = "0.9.5", package = "gtk4", features = ["v4_14"] }
+libloading = "0.8.6"
+rustls = { version = "0.23" }
+servo = { path = "../servo/components/servo", package = "libservo", features = [
+  "background_hang_monitor",
+] }
