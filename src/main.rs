@@ -44,51 +44,54 @@ fn main() -> glib::ExitCode {
 }
 
 fn build_ui(app: &Application) {
-    let gl_area = GLArea::default();
+    let gl_area = GLArea::builder()
+        .has_depth_buffer(true)
+        .has_stencil_buffer(true)
+        .width_request(800)
+        .height_request(600)
+        .build();
     gl_area.connect_realize(|area| {
-        if let Some(context) = area.context() {
-            let gl = if area.api().contains(GLAPI::GL) {
-                unsafe { gl::GlFns::load_with(epoxy::get_proc_addr) }
-            } else {
-                unsafe { gl::GlesFns::load_with(epoxy::get_proc_addr) }
-            };
-            let rendering_context = Rc::new(GTKRenderingContext {
-                gl_area: area.clone(),
-                context,
-                gl,
-            });
+        let gl = if area.api().contains(GLAPI::GL) {
+            unsafe { gl::GlFns::load_with(epoxy::get_proc_addr) }
+        } else {
+            unsafe { gl::GlesFns::load_with(epoxy::get_proc_addr) }
+        };
+        let rendering_context = Rc::new(GTKRenderingContext {
+            gl_area: area.clone(),
+            gl,
+        });
 
-            let servo = Servo::new(
-                Default::default(),
-                Default::default(),
-                rendering_context.clone(),
-                Box::new(EmbedderDelegate(Waker(()))),
-                rendering_context.clone(),
-                None,
-                CompositeTarget::ContextFbo,
-            );
-            servo.setup_logging();
-            let url = Url::parse("https://servo.org").unwrap();
-            let webview = servo.new_webview(url);
-            webview.set_delegate(Rc::new(Web));
+        // TODO Create Servo GObject that can create GLArea context
+        let servo = Servo::new(
+            Default::default(),
+            Default::default(),
+            rendering_context.clone(),
+            Box::new(EmbedderDelegate(Waker(()))),
+            rendering_context.clone(),
+            None,
+            CompositeTarget::ContextFbo,
+        );
+        servo.setup_logging();
+        let url = Url::parse("https://servo.org").unwrap();
+        let webview = servo.new_webview(url);
+        webview.set_delegate(Rc::new(Web));
 
-            glib::idle_add_local(move || {
-                servo.spin_event_loop();
-                servo.present();
-                glib::ControlFlow::Continue
-            });
+        glib::idle_add_local(move || {
+            servo.spin_event_loop();
+            servo.present();
+            glib::ControlFlow::Continue
+        });
 
-            area.connect_render(move |_, _| {
-                webview.composite();
-                Propagation::Stop
-            });
-        }
+        area.connect_render(move |_, _| {
+            webview.composite();
+            Propagation::Stop
+        });
     });
 
     // Create a window and set the title
     let window = ApplicationWindow::builder()
         .application(app)
-        .title("My GTK App")
+        .title("ServoGTK")
         .child(&gl_area)
         .build();
 
@@ -98,7 +101,6 @@ fn build_ui(app: &Application) {
 
 struct GTKRenderingContext {
     gl_area: GLArea,
-    context: GLContext,
     gl: Rc<dyn gl::Gl>,
 }
 
@@ -108,7 +110,6 @@ impl RenderingContext for GTKRenderingContext {
     }
 
     fn present(&self) {
-        // self.gl_area.emit_by_name::<()>("wake", &[]);
         self.gl_area.queue_render();
     }
 
@@ -130,7 +131,11 @@ impl RenderingContext for GTKRenderingContext {
     }
 
     fn gl_version(&self) -> servo::webrender_traits::rendering_context::GLVersion {
-        let (major, minor) = self.context.version();
+        let (major, minor) = self
+            .gl_area
+            .context()
+            .map(|c| c.version())
+            .unwrap_or_default();
         if self.gl_area.api() == GLAPI::GL {
             GLVersion::GL(major as u8, minor as u8)
         } else {
@@ -142,15 +147,17 @@ impl RenderingContext for GTKRenderingContext {
 impl WindowMethods for GTKRenderingContext {
     fn get_coordinates(&self) -> servo::compositing::windowing::EmbedderCoordinates {
         let scale = Scale::new(self.gl_area.scale_factor() as f32);
-        let size = Size2D::new(800, 600);
-        let fsize = Size2D::new(800, 600);
+        let (w, h) = self.gl_area.size_request();
+        dbg!(w, h);
+        let size = Size2D::new(w, h);
+        let fsize = Size2D::new(w, h);
         EmbedderCoordinates {
             hidpi_factor: scale,
             screen_size: size,
             available_screen_size: size,
             window_rect: Box2D::from_size(size),
             framebuffer: fsize,
-            viewport: Box2D::from_size(Size2D::new(800, 600)),
+            viewport: Box2D::from_size(Size2D::new(w, h)),
         }
     }
 
