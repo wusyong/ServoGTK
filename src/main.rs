@@ -1,16 +1,16 @@
 use std::rc::Rc;
 
-use gdk::ffi::GdkGLContext;
-use gdk::{GLContext, GLAPI};
 use gleam::gl;
+use gtk::gdk::{GLContext, GLAPI};
 use gtk::glib::Propagation;
-use gtk::{glib, Application, ApplicationWindow, Orientation};
+use gtk::{glib, Application, ApplicationWindow};
 use gtk::{prelude::*, GLArea};
 use servo::compositing::windowing::{EmbedderCoordinates, EmbedderMethods, WindowMethods};
 use servo::compositing::CompositeTarget;
 use servo::euclid::{Box2D, Scale, Size2D};
 use servo::webrender_traits::rendering_context::{GLVersion, RenderingContext};
-use servo::{EventLoopWaker, Servo};
+use servo::{EventLoopWaker, Servo, WebView, WebViewDelegate};
+use url::Url;
 
 const APP_ID: &str = "org.gtk_rs.HelloWorld2";
 
@@ -44,13 +44,7 @@ fn main() -> glib::ExitCode {
 }
 
 fn build_ui(app: &Application) {
-    let gl_area = GLArea::new();
-
-    // gl_area.connect_render(move |_area, _context| {
-    //     gl.clear_color(0., 0., 1., 1.);
-    //     gl.clear(gl::COLOR_BUFFER_BIT);
-    //     Propagation::Proceed
-    // });
+    let gl_area = GLArea::default();
     gl_area.connect_realize(|area| {
         if let Some(context) = area.context() {
             let gl = if area.api().contains(GLAPI::GL) {
@@ -64,7 +58,6 @@ fn build_ui(app: &Application) {
                 gl,
             });
 
-            rendering_context.make_current();
             let servo = Servo::new(
                 Default::default(),
                 Default::default(),
@@ -74,18 +67,21 @@ fn build_ui(app: &Application) {
                 None,
                 CompositeTarget::ContextFbo,
             );
+            servo.setup_logging();
+            let url = Url::parse("https://servo.org").unwrap();
+            let webview = servo.new_webview(url);
+            webview.set_delegate(Rc::new(Web));
 
-            // let (tx, rx) = async_channel::unbounded::<()>();
-            // // Future to handle waker event
-            // glib::spawn_future_local(glib::clone!(
-            //     #[weak]
-            //     area,
-            //     async move {
-            //         while rx.recv().await.is_ok() {
-            //             println!("1");
-            //         }
-            //     }
-            // ));
+            glib::idle_add_local(move || {
+                servo.spin_event_loop();
+                servo.present();
+                glib::ControlFlow::Continue
+            });
+
+            area.connect_render(move |_, _| {
+                webview.composite();
+                Propagation::Stop
+            });
         }
     });
 
@@ -112,6 +108,7 @@ impl RenderingContext for GTKRenderingContext {
     }
 
     fn present(&self) {
+        // self.gl_area.emit_by_name::<()>("wake", &[]);
         self.gl_area.queue_render();
     }
 
@@ -178,5 +175,15 @@ impl EventLoopWaker for Waker {
 
     fn wake(&self) {
         // let _ = self.0.send(()).await;
+    }
+}
+
+struct Web;
+
+impl WebViewDelegate for Web {
+    fn notify_ready_to_show(&self, webview: WebView) {
+        webview.focus();
+        webview.move_resize(Box2D::from_size(Size2D::new(800., 600.)));
+        webview.raise_to_top(true);
     }
 }
